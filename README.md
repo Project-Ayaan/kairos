@@ -32,22 +32,47 @@ The ETL pipeline pulls abstracts and full-text XML from PubMed/PMC, parses the J
 2. **Configure Environment Variables:**
    Copy `.env.example` to `.env` and fill in the necessary keys (e.g., `NCBI_API_KEY`, `MINIO_ROOT_USER`).
 
-3. **Install ETL Dependencies:**
-   The ETL pipeline requires specific dependencies isolated from the core application. Use `uv` to install the `etl` group:
+3. **Install Dependencies:**
+   The ETL pipeline and UI require specific dependencies. Sync both package groups using `uv`:
    ```bash
-   uv sync --group etl
+   uv sync --group etl --group ui
    ```
 
-4. **Run the Notebook:**
-   Launch Jupyter to execute the pipeline interactively:
+4. **Run the Automated ETL Pipeline:**
+   Ingest 1,000 PubMed articles, split them into chunks, generate MedCPT embeddings, and load them to Qdrant:
+   ```bash
+   uv run python etl/run_etl.py
+   ```
+   This script parses XML articles, implements sentence-boundary sliding-window chunking, generates embeddings in batches, and upserts them to the `pubmed_articles` collection.
+
+5. **Interactive Notebook (Optional):**
+   Alternatively, you can run the pipeline interactively:
    ```bash
    uv run --group etl jupyter notebook data/pubmed_qdrant_etl.ipynb
    ```
-   Execute the cells in sequence. The pipeline supports incremental updates—it will automatically diff against existing PMIDs in Qdrant and only process new articles.
 
-### 2. Exporting Data (Snapshotting)
+### 2. Testing with Streamlit CDSS UI
 
-Once the ETL pipeline has finished and you have verified the data in Qdrant (available at `http://localhost:6333/dashboard`), you must create a snapshot for production.
+After populating Qdrant, you can start the Streamlit testing interface to query the database and test the RAG response pipeline using Groq.
+
+1. **Verify environment keys:**
+   Ensure `GROQ_API_KEY` is present in your `.env` file. The RAG pipeline defaults to using the `openai/gpt-oss-20b` model.
+
+2. **Launch Streamlit server:**
+   Start the Streamlit application in headless mode:
+   ```bash
+   uv run streamlit run ui/app.py --server.port 8501 --server.headless true
+   ```
+
+3. **Interact and test:**
+   Open `http://localhost:8501` in your browser. Use the provided quick test query buttons or input your own clinical query. You will see:
+   - The synthesized grounded answer with inline citations.
+   - The retrieved evidence sources from Qdrant with authors, journal, year, PMID, and cosine similarity score.
+   - Configurable parameters in the sidebar (Top-K chunks, Temperature, and custom Groq model ID).
+
+### 3. Exporting Data (Snapshotting)
+
+Once the ETL pipeline has finished and you have verified the data in Qdrant, you must create a snapshot for production.
 
 1. **Stop Qdrant Gracefully:**
    Ensure no active writes are occurring, then stop the Qdrant container:
@@ -56,7 +81,7 @@ Once the ETL pipeline has finished and you have verified the data in Qdrant (ava
    ```
 
 2. **Create the Snapshot Tarball:**
-   Compress the local Qdrant storage volume into a tarball. (See the helper scripts at the end of the ETL notebook for automated commands).
+   Compress the local Qdrant storage volume into a tarball:
    ```bash
    tar -czf qdrant_snapshot.tar.gz -C <path_to_qdrant_storage_volume> .
    ```
@@ -64,7 +89,7 @@ Once the ETL pipeline has finished and you have verified the data in Qdrant (ava
 3. **Upload to MinIO:**
    Upload the `qdrant_snapshot.tar.gz` to the `qdrant-snapshots` bucket in your MinIO instance. Ensure you capture the SHA256 checksum of the file.
 
-### 3. Production Migration (Init Container Strategy)
+### 4. Production Migration (Init Container Strategy)
 
 To avoid running ETL scripts on production servers, Kairos uses an **Init Container (Raw Storage Volume Sync)** approach.
 

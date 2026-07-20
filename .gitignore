@@ -1,0 +1,67 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment variables
+.env
+.env.local
+
+# Virtual Environments (uv, venv, conda, etc.)
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Project tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Logs & temp files
+*.log
+tmp/
+temp/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specific data & artifacts
+data/
+*.tar.gz
+
+# Agent memory (if applicable)
+.agents/

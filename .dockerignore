@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Virtual environments & Caches
+.venv
+venv
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Agent context
+.agents/
+Kairos CDSS Architecture Design.md
+
+# Build & Test outputs
+.coverage
+htmlcov/
+tests/
+
+# Jupyter & Data
+.ipynb_checkpoints/
+data/
+*.ipynb
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+docker/
+
+# Markdown/Docs
+README.md
