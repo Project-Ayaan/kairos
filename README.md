@@ -1,112 +1,103 @@
 # Kairos CDSS
 
-Kairos is an open-source Clinical Decision Support System (CDSS) built to interpret unstructured clinical queries and synthesize evidence-grounded answers. It leverages a Retrieval-Augmented Generation (RAG) architecture powered by Qdrant, MinIO, and large language models tailored for the medical domain.
+Kairos is an open-source Clinical Decision Support System (CDSS) built to interpret unstructured clinical queries and synthesize evidence-grounded answers. It leverages a Retrieval-Augmented Generation (RAG) architecture powered by Qdrant, MinIO, MedCPT embeddings, and domain-tuned medical language models.
+
+For detailed architecture blueprints and AI coding guidelines, see:
+- [Kairos CDSS Architecture Design.md](file:///c:/DevDojo/kairos/Kairos%20CDSS%20Architecture%20Design.md) - Deep-dive technical blueprint.
+- [AGENTS.md](file:///c:/DevDojo/kairos/AGENTS.md) - AI agent context, guidelines, and repository conventions.
 
 ---
 
-## Architecture Overview
+## Technical Architecture Overview
 
-The system operates across several core components:
-- **FastAPI Backend:** Provides the API for processing clinical queries.
-- **Qdrant:** High-performance vector database storing dense embeddings (MedCPT) of medical literature.
-- **MinIO:** S3-compatible object storage used primarily for snapshot management and data migration.
+Kairos consists of five primary subsystems:
+1. **Ingestion & Normalization Engine (`etl/`):** Fetches PubMed abstracts and PMC JATS XML full-text articles, parses XML structure with `lxml`, applies paragraph-level sliding window chunking, and computes MedCPT embeddings.
+2. **Dual-Retrieval Core:** Combines MedCPT dense vector search (Qdrant) and BM25 sparse keyword search via Reciprocal Rank Fusion ($k=60$) and MedCPT Cross-Encoder reranking.
+3. **Evidence Appraisal Engine (GRADE):** Evaluates study designs, risk of bias, and evidence certainty to assign EvidenceGrade ratings (A through D, or U).
+4. **FastAPI Backend (`src/app/`):** High-performance async API service exposing CDSS search, evidence generation, and interoperability endpoints.
+5. **Streamlit Point-of-Care Harness (`ui/`):** Interactive UI for querying literature, testing RAG response generation, and inspecting retrieved source provenance.
 
 ---
 
-## Developer Guide: Data ETL & Production Migration
+## Developer Setup & Usage Guide
 
-To ensure high performance and zero downtime in production, the heavy Extract, Transform, Load (ETL) pipeline runs *only* in the developer or staging environments. The resulting data is then migrated to production using Docker init containers.
+### Prerequisites
+- Python 3.11+
+- [`uv`](https://github.com/astral-sh/uv) (Python package installer and runner)
+- Docker & Docker Compose
 
-### 1. Running the ETL Pipeline (Dev Environment)
+### 1. Environment Setup
 
-The ETL pipeline pulls abstracts and full-text XML from PubMed/PMC, parses the JATS structure, creates MedCPT embeddings, and upserts them into a local Qdrant instance.
+Copy `.env.example` to `.env` and fill in required variables:
+```bash
+cp .env.example .env
+```
 
-**Step-by-Step Setup:**
+Sync all project dependencies (including ETL and UI groups):
+```bash
+uv sync --group etl --group ui
+```
 
-1. **Start the Infrastructure:**
-   Spin up the required services (Qdrant and MinIO) using Docker Compose:
+---
+
+### 2. Data ETL & Local Vector Ingestion (Dev Environment)
+
+To ensure high performance and zero downtime in production, the heavy Extract, Transform, Load (ETL) pipeline runs *only* in developer or staging environments.
+
+1. **Start Local Infrastructure (Qdrant + MinIO):**
    ```bash
    docker compose up qdrant minio -d
    ```
 
-2. **Configure Environment Variables:**
-   Copy `.env.example` to `.env` and fill in the necessary keys (e.g., `NCBI_API_KEY`, `MINIO_ROOT_USER`).
-
-3. **Install Dependencies:**
-   The ETL pipeline and UI require specific dependencies. Sync both package groups using `uv`:
-   ```bash
-   uv sync --group etl --group ui
-   ```
-
-4. **Run the Automated ETL Pipeline:**
-   Ingest 1,000 PubMed articles, split them into chunks, generate MedCPT embeddings, and load them to Qdrant:
+2. **Run Automated Ingestion Pipeline:**
    ```bash
    uv run python etl/run_etl.py
    ```
-   This script parses XML articles, implements sentence-boundary sliding-window chunking, generates embeddings in batches, and upserts them to the `pubmed_articles` collection.
+   This script parses XML articles, implements sentence-boundary sliding-window chunking, generates MedCPT embeddings, and upserts them to Qdrant (`pubmed_articles` collection).
 
-5. **Interactive Notebook (Optional):**
-   Alternatively, you can run the pipeline interactively:
+3. **Interactive Notebook (Optional):**
    ```bash
    uv run --group etl jupyter notebook data/pubmed_qdrant_etl.ipynb
    ```
 
-### 2. Testing with Streamlit CDSS UI
+---
 
-After populating Qdrant, you can start the Streamlit testing interface to query the database and test the RAG response pipeline using Groq.
+### 3. Running the Services
 
-1. **Verify environment keys:**
-   Ensure `GROQ_API_KEY` is present in your `.env` file. The RAG pipeline defaults to using the `openai/gpt-oss-20b` model.
+#### A. Streamlit CDSS UI Test Harness
+Test RAG generation, vector similarity search, and source provenance interactively:
+```bash
+uv run streamlit run ui/app.py --server.port 8501 --server.headless true
+```
+Open `http://localhost:8501` in your browser. Ensure `GROQ_API_KEY` is configured in `.env`.
 
-2. **Launch Streamlit server:**
-   Start the Streamlit application in headless mode:
-   ```bash
-   uv run streamlit run ui/app.py --server.port 8501 --server.headless true
-   ```
+#### B. FastAPI Core Backend Service
+Start the core REST API server:
+```bash
+uv run uvicorn src.app.main:app --reload --port 8000
+```
+API docs will be accessible at `http://localhost:8000/docs`.
 
-3. **Interact and test:**
-   Open `http://localhost:8501` in your browser. Use the provided quick test query buttons or input your own clinical query. You will see:
-   - The synthesized grounded answer with inline citations.
-   - The retrieved evidence sources from Qdrant with authors, journal, year, PMID, and cosine similarity score.
-   - Configurable parameters in the sidebar (Top-K chunks, Temperature, and custom Groq model ID).
-
-### 3. Exporting Data (Snapshotting)
-
-Once the ETL pipeline has finished and you have verified the data in Qdrant, you must create a snapshot for production.
-
-1. **Stop Qdrant Gracefully:**
-   Ensure no active writes are occurring, then stop the Qdrant container:
-   ```bash
-   docker compose stop qdrant
-   ```
-
-2. **Create the Snapshot Tarball:**
-   Compress the local Qdrant storage volume into a tarball:
-   ```bash
-   tar -czf qdrant_snapshot.tar.gz -C <path_to_qdrant_storage_volume> .
-   ```
-
-3. **Upload to MinIO:**
-   Upload the `qdrant_snapshot.tar.gz` to the `qdrant-snapshots` bucket in your MinIO instance. Ensure you capture the SHA256 checksum of the file.
+---
 
 ### 4. Production Migration (Init Container Strategy)
 
 To avoid running ETL scripts on production servers, Kairos uses an **Init Container (Raw Storage Volume Sync)** approach.
 
-When you deploy to production:
+1. **Create & Export Qdrant Snapshot (Staging/Dev):**
+   ```bash
+   docker compose stop qdrant
+   tar -czf qdrant_snapshot.tar.gz -C <path_to_qdrant_storage_volume> .
+   ```
+   Upload `qdrant_snapshot.tar.gz` to the `qdrant-snapshots` bucket in MinIO and record its SHA256 checksum.
 
-1. **Configure Production Variables:**
-   In your production environment, set the `QDRANT_SNAPSHOT_SHA256` environment variable to the checksum of your newly uploaded snapshot.
-
-2. **Deploy via Docker Compose:**
-   Run the production compose file:
+2. **Deploy via Production Docker Compose:**
+   Set `QDRANT_SNAPSHOT_SHA256` in your production environment and launch:
    ```bash
    docker compose -f docker-compose.prod.yml up -d
    ```
 
 **How it works:**
-- Before the main `qdrant` service boots, Docker launches the `qdrant-init` container.
-- `qdrant-init` checks if the `/qdrant/storage` volume is empty. 
-- If empty, it securely downloads the `qdrant_snapshot.tar.gz` from MinIO, verifies the SHA256 hash, and extracts the contents directly into the persistent volume.
-- Once `qdrant-init` exits successfully (code `0`), the main `qdrant` service starts up instantly with all the vector data already present on disk. 
-- Subsequent restarts will bypass the download step if the directory is already populated.
+- The `qdrant-init` container runs before the main `qdrant` service.
+- If `/qdrant/storage` is empty, it downloads `qdrant_snapshot.tar.gz` from MinIO, verifies the SHA256 hash, and extracts the volume contents.
+- The main `qdrant` container starts with all vector index data pre-populated on disk.
