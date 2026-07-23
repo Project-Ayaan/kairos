@@ -33,6 +33,12 @@ Copy `.env.example` to `.env` and fill in required variables:
 cp .env.example .env
 ```
 
+**Required environment variables:**
+- `QDRANT_URL`: Qdrant vector database endpoint (default: `http://localhost:6333`)
+- `COLLECTION_NAME`: Shared knowledge collection for PubMed + policy documents (default: `kairos_knowledge`)
+- `GROQ_API_KEY`: Groq API key for LLM synthesis
+- `A2A_API_KEY`: Optional Bearer token for A2A endpoint (open by default if unset)
+
 Sync all project dependencies (including ETL and UI groups):
 ```bash
 uv sync --group etl --group ui
@@ -49,16 +55,17 @@ To ensure high performance and zero downtime in production, the heavy Extract, T
    docker compose up qdrant minio -d
    ```
 
-2. **Run Automated Ingestion Pipeline:**
+2. **Ingest PubMed Literature:**
    ```bash
    uv run python etl/run_etl.py
    ```
-   This script parses XML articles, implements sentence-boundary sliding-window chunking, generates MedCPT embeddings, and upserts them to Qdrant (`pubmed_articles` collection).
+   Fetches PubMed articles via NCBI E-utilities API, applies sentence-boundary sliding-window chunking (256 words, 50-word overlap), generates MedCPT embeddings, and upserts to Qdrant (`kairos_knowledge` collection with `source_type="pubmed"`).
 
-3. **Interactive Notebook (Optional):**
+3. **Ingest Local Policy Documents (Optional):**
    ```bash
-   uv run --group etl jupyter notebook data/pubmed_qdrant_etl.ipynb
+   uv run python etl/ingest_documents.py /path/to/pdf_or_docx_files
    ```
+   Accepts local PDF/DOCX files, extracts text by page/heading, chunks via same sentence-boundary logic, embeds with MedCPT, and upserts to shared `kairos_knowledge` collection with `source_type="policy_document"`.
 
 ---
 
@@ -77,6 +84,13 @@ Start the core REST API server:
 uv run uvicorn src.app.main:app --reload --port 8000
 ```
 API docs will be accessible at `http://localhost:8000/docs`.
+
+#### C. A2A Agent Service
+Expose Kairos as an A2A-compatible agent for orchestrators:
+```bash
+uv run uvicorn src.app.main:app --reload --port 8689
+```
+Agent discovery available at `http://localhost:8689/.well-known/agent.json`. Supports both PubMed and policy-document queries via single `/a2a` endpoint. Optional Bearer token authentication via `A2A_API_KEY` environment variable.
 
 ---
 
@@ -101,3 +115,5 @@ To avoid running ETL scripts on production servers, Kairos uses an **Init Contai
 - The `qdrant-init` container runs before the main `qdrant` service.
 - If `/qdrant/storage` is empty, it downloads `qdrant_snapshot.tar.gz` from MinIO, verifies the SHA256 hash, and extracts the volume contents.
 - The main `qdrant` container starts with all vector index data pre-populated on disk.
+
+**Migration Note:** If migrating from earlier deployments with `pubmed_articles` collection, manually reindex or create an alias to `kairos_knowledge` before deploying. The system now defaults to `kairos_knowledge` for unified PubMed + policy-document storage.
