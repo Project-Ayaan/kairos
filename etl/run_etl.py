@@ -8,12 +8,14 @@ import xml.etree.ElementTree as ET
 from tqdm import tqdm
 from dotenv import load_dotenv
 
+from chunking import chunk_text
+
 # Load environment variables
 load_dotenv()
 
 # Qdrant Config
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "pubmed_articles"
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "kairos_knowledge")
 
 # NCBI API Config
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
@@ -22,64 +24,6 @@ PUBMED_BATCH_LIMIT = int(os.getenv("PUBMED_BATCH_LIMIT", "1000"))
 
 # Models
 MEDCPT_ARTICLE_ENCODER = "ncbi/MedCPT-Article-Encoder"
-
-# Sentence splitting regex
-SENTENCE_END = re.compile(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?)\s')
-
-def split_into_sentences(text):
-    sentences = SENTENCE_END.split(text)
-    return [s.strip() for s in sentences if s.strip()]
-
-def chunk_text(title, abstract_text, max_words=256, overlap_words=50):
-    text = f"{title}. {abstract_text}"
-    words = text.split()
-    if len(words) <= max_words:
-        return [text]
-    
-    sentences = split_into_sentences(text)
-    chunks = []
-    current_chunk_sentences = []
-    current_word_count = 0
-    
-    for sentence in sentences:
-        sent_words = sentence.split()
-        if not sent_words:
-            continue
-        
-        # If a single sentence is longer than max_words, chunk by words
-        if len(sent_words) > max_words:
-            if current_chunk_sentences:
-                chunks.append(" ".join(current_chunk_sentences))
-                current_chunk_sentences = []
-                current_word_count = 0
-            for i in range(0, len(sent_words), max_words - overlap_words):
-                chunk_w = sent_words[i : i + max_words]
-                chunks.append(" ".join(chunk_w))
-            continue
-        
-        if current_word_count + len(sent_words) > max_words:
-            chunks.append(" ".join(current_chunk_sentences))
-            # Create overlap from end of current chunk
-            overlap_sentences = []
-            overlap_count = 0
-            for prev_sent in reversed(current_chunk_sentences):
-                prev_sent_words = prev_sent.split()
-                if overlap_count + len(prev_sent_words) <= overlap_words:
-                    overlap_sentences.insert(0, prev_sent)
-                    overlap_count += len(prev_sent_words)
-                else:
-                    break
-            
-            current_chunk_sentences = overlap_sentences + [sentence]
-            current_word_count = overlap_count + len(sent_words)
-        else:
-            current_chunk_sentences.append(sentence)
-            current_word_count += len(sent_words)
-            
-    if current_chunk_sentences:
-        chunks.append(" ".join(current_chunk_sentences))
-        
-    return chunks
 
 def fetch_pmids(term, limit):
     url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -172,14 +116,26 @@ def fetch_articles(pmids):
             authors_text = ", ".join(author_names[:5])
             if len(author_names) > 5:
                 authors_text += " et al."
-                
+
+            # DOI / PMCID (present in PubmedData/ArticleIdList, not MedlineCitation)
+            doi = None
+            pmcid = None
+            for article_id in article.findall(".//PubmedData/ArticleIdList/ArticleId"):
+                id_type = article_id.get("IdType")
+                if id_type == "doi" and article_id.text:
+                    doi = article_id.text.strip()
+                elif id_type == "pmc" and article_id.text:
+                    pmcid = article_id.text.strip()
+
             articles.append({
                 "pmid": pmid,
                 "title": title_text,
                 "abstract": abstract_text,
                 "journal": journal_text,
                 "year": pub_year,
-                "authors": authors_text
+                "authors": authors_text,
+                "doi": doi,
+                "pmcid": pmcid
             })
         except Exception as e:
             print(f"Error parsing article xml: {e}", file=sys.stderr)
@@ -256,6 +212,8 @@ def main():
                         "journal": art["journal"],
                         "year": art["year"],
                         "authors": art["authors"],
+                        "doi": art["doi"],
+                        "pmcid": art["pmcid"],
                         "chunk_idx": idx
                     })
             # Sleep to respect rate limits
@@ -291,12 +249,15 @@ def main():
                         id=point_id,
                         vector=emb,
                         payload={
+                            "source_type": "pubmed",
                             "pmid": item["pmid"],
                             "title": item["title"],
                             "text": item["text"],
                             "journal": item["journal"],
                             "year": item["year"],
                             "authors": item["authors"],
+                            "doi": item["doi"],
+                            "pmcid": item["pmcid"],
                             "chunk_idx": item["chunk_idx"]
                         }
                     )

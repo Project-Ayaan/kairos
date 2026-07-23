@@ -12,7 +12,7 @@ from app.core.config import settings
 # Define the baseline machine-readable A2A AgentCard for Kairos CDSS discovery.
 KAIROS_AGENT_CARD = AgentCard(
     name="Kairos CDSS",
-    description="Evidence-grounded Clinical Decision Support agent. Answers clinical queries by retrieving and synthesizing PubMed literature. Returns a synthesized answer with full source citation metadata (PMID, DOI, PMCID, PubMed URL, authors, journal, year, relevance score).",
+    description="Evidence-grounded Clinical Decision Support agent. Answers clinical queries by retrieving and synthesizing PubMed literature alongside other reference material such as policy documents. Returns a synthesized answer with full source citation metadata (source type, PMID, DOI, PMCID, PubMed URL, document name/section, authors, journal, year, relevance score).",
     version="0.1.0",
     capabilities=AgentCapabilities(
         streaming=False,
@@ -22,10 +22,10 @@ KAIROS_AGENT_CARD = AgentCard(
         AgentSkill(
             id="clinical_query",
             name="Clinical Evidence Query",
-            description="Accepts a clinical question and returns a grounded synthesis with source metadata.",
+            description="Accepts a clinical or policy question and returns a grounded synthesis with source metadata drawn from PubMed literature and/or reference documents.",
             input_modes=["text"],
             output_modes=["text", "data"],
-            tags=["clinical", "evidence", "pubmed", "cdss", "medical"]
+            tags=["clinical", "evidence", "pubmed", "cdss", "medical", "policy"]
         )
     ],
     default_input_modes=["text"],

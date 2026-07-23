@@ -9,26 +9,36 @@ from groq import Groq
 
 # Constants
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "pubmed_articles"
+COLLECTION_NAME = "kairos_knowledge"
 MEDCPT_QUERY_ENCODER = "ncbi/MedCPT-Query-Encoder"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 
 class SourceChunk(BaseModel):
-    """Pydantic model representing a retrieved PubMed article chunk with metadata."""
+    """Pydantic model representing a retrieved knowledge chunk with metadata.
+
+    Covers both PubMed literature (source_type="pubmed") and other reference
+    material such as policy documents (source_type="policy_document").
+    """
+    source_type: str = "pubmed"
+    # PubMed-specific fields
     pmid: Optional[str] = None
     pmcid: Optional[str] = None
     doi: Optional[str] = None
-    title: Optional[str] = None
-    text: Optional[str] = None
     journal: Optional[str] = None
     year: Optional[str] = None
     authors: Optional[str] = None
+    # Generic document fields
+    document_name: Optional[str] = None
+    section: Optional[str] = None
+    # Shared fields
+    title: Optional[str] = None
+    text: Optional[str] = None
     chunk_idx: Optional[int] = None
     score: float = 0.0
 
     @property
     def pubmed_url(self) -> Optional[str]:
-        if self.pmid:
+        if self.source_type == "pubmed" and self.pmid:
             return f"https://pubmed.ncbi.nlm.nih.gov/{self.pmid}"
         return None
 
@@ -80,6 +90,7 @@ class KairosRAGPipeline:
         for hit in results.points:
             payload = hit.payload
             chunks.append(SourceChunk(
+                source_type=payload.get("source_type", "pubmed"),
                 pmid=payload.get("pmid"),
                 pmcid=payload.get("pmcid"),
                 doi=payload.get("doi"),
@@ -88,6 +99,8 @@ class KairosRAGPipeline:
                 journal=payload.get("journal"),
                 year=str(payload.get("year")) if payload.get("year") is not None else None,
                 authors=payload.get("authors"),
+                document_name=payload.get("document_name"),
+                section=payload.get("section"),
                 chunk_idx=payload.get("chunk_idx"),
                 score=hit.score
             ))
@@ -107,19 +120,26 @@ class KairosRAGPipeline:
         client = Groq(api_key=groq_api_key)
         
         if not chunks:
-            return "No relevant clinical literature found in the Qdrant database to address this query."
-            
-        # Format the context for the prompt
+            return "No relevant clinical literature or reference documents found in the knowledge base to address this query."
+
+        # Format the context for the prompt, branching citation style by source type
         context_str = ""
         for idx, chunk in enumerate(chunks, 1):
-            context_str += f"[{idx}] Title: {chunk.title}\n"
-            context_str += f"Authors: {chunk.authors} | Journal: {chunk.journal} ({chunk.year})\n"
-            context_str += f"PMID: {chunk.pmid} | Relevance Score: {chunk.score:.4f}\n"
+            if chunk.source_type == "pubmed":
+                context_str += f"[{idx}] Title: {chunk.title}\n"
+                context_str += f"Authors: {chunk.authors} | Journal: {chunk.journal} ({chunk.year})\n"
+                context_str += f"PMID: {chunk.pmid} | Relevance Score: {chunk.score:.4f}\n"
+            else:
+                context_str += f"[{idx}] Document: {chunk.document_name or chunk.title}\n"
+                if chunk.section:
+                    context_str += f"Section: {chunk.section}\n"
+                context_str += f"Relevance Score: {chunk.score:.4f}\n"
             context_str += f"Content: {chunk.text}\n\n"
-            
+
         system_prompt = (
             "You are Kairos, an advanced Clinical Decision Support System (CDSS) assistant.\n"
-            "Your role is to answer the clinician's query using ONLY the provided clinical evidence context from PubMed.\n\n"
+            "Your role is to answer the clinician's query using ONLY the provided evidence context, which may include "
+            "PubMed literature and other reference material such as policy documents.\n\n"
             "Strict Guidelines:\n"
             "1. GROUNDEDNESS: Every claim you make MUST be directly supported by the retrieved context. Do NOT extrapolate or introduce external facts.\n"
             "2. INLINE CITATIONS: Reference source articles using inline numbers corresponding to the context index (e.g., [1], [2]).\n"

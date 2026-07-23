@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     """Application settings, loaded from environment variables and .env file."""
     
     qdrant_url: str = Field(default="http://localhost:6333")
-    collection_name: str = "pubmed_articles"
+    collection_name: str = "kairos_knowledge"
     groq_api_key: Optional[str] = Field(default=None)
     groq_model: str = "openai/gpt-oss-20b"
     top_k: int = 5

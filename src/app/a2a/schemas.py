@@ -2,7 +2,12 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 class SourceMetadata(BaseModel):
-    """Structured citation metadata for a retrieved PubMed chunk."""
+    """Structured citation metadata for a retrieved knowledge chunk.
+
+    Covers both PubMed literature (source_type="pubmed") and other reference
+    material such as policy documents (source_type="policy_document").
+    """
+    source_type: str = "pubmed"
     pmid: Optional[str] = None
     pmcid: Optional[str] = None
     doi: Optional[str] = None
@@ -11,6 +16,8 @@ class SourceMetadata(BaseModel):
     authors: Optional[str] = None
     journal: Optional[str] = None
     year: Optional[str] = None
+    document_name: Optional[str] = None
+    section: Optional[str] = None
     similarity_score: float = 0.0
     chunk_idx: Optional[int] = None
 

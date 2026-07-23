@@ -6,7 +6,7 @@ from groq import Groq
 
 # Config
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "pubmed_articles"
+COLLECTION_NAME = "kairos_knowledge"
 MEDCPT_QUERY_ENCODER = "ncbi/MedCPT-Query-Encoder"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 
@@ -47,12 +47,15 @@ def search_qdrant(vector, top_k=5):
     for hit in results.points:
         payload = hit.payload
         chunks.append({
+            "source_type": payload.get("source_type", "pubmed"),
             "pmid": payload.get("pmid"),
             "title": payload.get("title"),
             "text": payload.get("text"),
             "journal": payload.get("journal"),
             "year": payload.get("year"),
             "authors": payload.get("authors"),
+            "document_name": payload.get("document_name"),
+            "section": payload.get("section"),
             "chunk_idx": payload.get("chunk_idx"),
             "score": hit.score
         })
@@ -68,17 +71,24 @@ def generate_answer(query, chunks, model_name=DEFAULT_GROQ_MODEL, temperature=0.
     if not chunks:
         return "No relevant clinical literature found in the Qdrant database to address this query."
         
-    # Format the context for the prompt
+    # Format the context for the prompt, branching citation style by source type
     context_str = ""
     for idx, chunk in enumerate(chunks, 1):
-        context_str += f"[{idx}] Title: {chunk['title']}\n"
-        context_str += f"Authors: {chunk['authors']} | Journal: {chunk['journal']} ({chunk['year']})\n"
-        context_str += f"PMID: {chunk['pmid']} | Relevance Score: {chunk['score']:.4f}\n"
+        if chunk.get("source_type", "pubmed") == "pubmed":
+            context_str += f"[{idx}] Title: {chunk['title']}\n"
+            context_str += f"Authors: {chunk['authors']} | Journal: {chunk['journal']} ({chunk['year']})\n"
+            context_str += f"PMID: {chunk['pmid']} | Relevance Score: {chunk['score']:.4f}\n"
+        else:
+            context_str += f"[{idx}] Document: {chunk.get('document_name') or chunk['title']}\n"
+            if chunk.get("section"):
+                context_str += f"Section: {chunk['section']}\n"
+            context_str += f"Relevance Score: {chunk['score']:.4f}\n"
         context_str += f"Content: {chunk['text']}\n\n"
-        
+
     system_prompt = (
         "You are Kairos, an advanced Clinical Decision Support System (CDSS) assistant.\n"
-        "Your role is to answer the clinician's query using ONLY the provided clinical evidence context from PubMed.\n\n"
+        "Your role is to answer the clinician's query using ONLY the provided evidence context, which may include "
+        "PubMed literature and other reference material such as policy documents.\n\n"
         "Strict Guidelines:\n"
         "1. GROUNDEDNESS: Every claim you make MUST be directly supported by the retrieved context. Do NOT extrapolate or introduce external facts.\n"
         "2. INLINE CITATIONS: Reference source articles using inline numbers corresponding to the context index (e.g., [1], [2]).\n"

@@ -84,6 +84,7 @@ class KairosAgentExecutor(AgentExecutor):
             # 6. Enqueue Source citation metadata artifact
             sources_data = [
                 {
+                    "source_type": chunk.source_type,
                     "pmid": chunk.pmid,
                     "pmcid": chunk.pmcid,
                     "doi": chunk.doi,
@@ -92,6 +93,8 @@ class KairosAgentExecutor(AgentExecutor):
                     "authors": chunk.authors,
                     "journal": chunk.journal,
                     "year": chunk.year,
+                    "document_name": chunk.document_name,
+                    "section": chunk.section,
                     "similarity_score": chunk.score,
                     "chunk_idx": chunk.chunk_idx
                 }

@@ -1,3 +1,5 @@
+import secrets
+
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -36,7 +38,7 @@ class A2AAuthMiddleware(BaseHTTPMiddleware):
                     )
                 
                 token = auth_header.split(" ", 1)[1]
-                if token != settings.a2a_api_key:
+                if not secrets.compare_digest(token, settings.a2a_api_key):
                     return JSONResponse(
                         status_code=401,
                         content={"detail": "Invalid A2A API key."}
